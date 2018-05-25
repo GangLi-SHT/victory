@@ -1,4 +1,4 @@
-# victory
+# victory !(https://github.com/GangLi-SHT/victory/blob/master/logo.png)
 Victory is an efficient implantation of the Parquet equation for the single-band Hubbard model. It fully respects the periodic and anti-periodic boundary condition of the parquet equation in momentum and frequency spaces. Currently the following feasures are implemented:
 
 (1) Both 1D and 2D calculations of the Hubbard model with on-site Coulomb interactions.
