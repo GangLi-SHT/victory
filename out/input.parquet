@@ -1,0 +1,9 @@
+4  4  30  5.0  4.0  1.0  0.4
+.False.
+.True.
+.False.
+
+# Nx, Ny, nOmega, beta, U, nParticle, f_damping
+# Debug_Info
+# Edge_Scan
+# DGA
