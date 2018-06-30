@@ -1,4 +1,4 @@
-FC          = mpiifort
+FC          = mpif90
 FC_FLAGS    = -traceback -check bounds -warn all 
 DIR         = SET YOUR VICTORY ROOT DIRECTORY HERE
 BIN         = $(DIR)/bin
