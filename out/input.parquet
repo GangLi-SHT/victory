@@ -1,9 +1,15 @@
-4  4  30  5.0  4.0  1.0  0.4
+3  4  24  11  5.0  4.0  1.0  0.0 
+0.4  1  0.001
+300
 .False.
-.True.
+.False.
+.False.
 .False.
 
-# Nx, Ny, nOmega, beta, U, nParticle, f_damping
-# Debug_Info
-# Edge_Scan
+# Nx_IBZ, Ny, nOmega, Ngrain, beta, U, nParticle, tprime
+# f_damping, f_range, f_sigma
+# ite_max
 # DGA
+# Sigma_ini
+# No_sigma_update
+# Eigen
