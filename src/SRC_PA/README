@@ -1,3 +1,4 @@
-1. copy and initialize from the second-level kernel approximation of the parquet equations
-2. replace the bare interaction-U in the self-energy with the fully irreducible vertex
+Version 1.1 uses the point group symmtry of the square lattice and fine-graining for 
+the Green's functions in Bethe-Salpeter and Schwinger-Dyson equations
+
 
