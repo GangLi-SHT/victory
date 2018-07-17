@@ -97,7 +97,7 @@ module Parquet_Phys
                     do iy2 = 1,Ngrain 
                       ! use the non-interacting green's function when q-k is outside the box
                       dummy = dummy + One/( xi*Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One) + mu - Ek_grain(ix,Ngrain-ix2+1, iy,Ngrain-iy2+1) -&
-                      Sigma_H(ix2, iy2))/( xi*Pi/beta*(Two*(map_j%iw-Nf/2-1) + One) + mu - Ek_grain(map_j%ix,ix2, map_j%iy,iy2) -Sigma(j))
+                      Sigma_H(ix, iy))/( xi*Pi/beta*(Two*(map_j%iw-Nf/2-1) + One) + mu - Ek_grain(map_j%ix,ix2, map_j%iy,iy2) -Sigma(j))
                     end do
                   end do
                 else
