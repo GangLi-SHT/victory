@@ -18,7 +18,7 @@ module parquet_selfenergy
     !
     implicit none
     integer, intent(in)     :: ite
-    complex(dp), intent(in) :: Grt(Nx, Ny, Nf)
+    complex(dp), intent(in) :: Grt(Nx*Ngrain, Ny*Ngrain, Nf)
     logical, intent(out)    :: Converged
     
     ! ... local vars ...
@@ -56,36 +56,38 @@ module parquet_selfenergy
     
     ! [2] second order diagram 
     
-    if (.NOT. allocated(dummy3d_1)) allocate(dummy3d_1(Nx, Ny, Nf))
+    if (.NOT. allocated(dummy3d_1)) allocate(dummy3d_1(Nx*Ngrain, Ny*Ngrain, Nf))
     MType = 'Fermionic'
     dummy3D_1 = Zero
     do iTau = 1, Nf
-      do i = 1, Nx
+      do i = 1, Nx*Ngrain
         if (i == 1) then
           i1 = 1
         else
-          i1 = Nx-i+2
+          i1 = Nx*Ngrain-i+2
         end if
-        do j = 1, Ny
+        do j = 1, Ny*Ngrain
           if (j == 1) then
             j1 = 1
           else
-            j1 = Ny-j+2
+            j1 = Ny*Ngrain-j+2
           end if
           dummy3D_1(i, j, iTau) = Grt(i, j, iTau)**2*Grt(i1, j1, Nf-iTau+1)*xU*xU
         end do
       end do
       
       ! --- now change it to k-t space by using FFT ---
-      call fftb2d(Nx, Ny, dummy3D_1(1:Nx, 1:Ny, iTau), C_wave_x, C_wave_y)          ! 2nd Sigma in k-t space!       
+      call fftb2d(Nx*Ngrain, Ny*Ngrain, dummy3D_1(1:Nx*Ngrain, 1:Ny*Ngrain, iTau), C_wave_x, C_wave_y)          ! 2nd Sigma in k-t space!       
     end do
     
     ! 2nd Sigma in k-w space
     if (.NOT. allocated(coutdata)) allocate(coutdata(Nf/2))
     do i = 1, Nx
+      i1= (i-1)*Ngrain + 1
       do j = 1, Ny
-        call FDfit(Nf, dble(dummy3D_1(i, j, 1:Nf)), beta/(Nf-1), FD1, FD2)
-        call nfourier(MType, Nf-1, Nf/2, FD1, FD2, dble(dummy3D_1(i, j, 1:Nf)), coutdata)
+        j1 = (j-1)*Ngrain + 1
+        call FDfit(Nf, dble(dummy3D_1(i1, j1, 1:Nf)), beta/(Nf-1), FD1, FD2)
+        call nfourier(MType, Nf-1, Nf/2, FD1, FD2, dble(dummy3D_1(i1, j1, 1:Nf)), coutdata)
         do k = 1, Nf/2
           idx = (Ny*(i-1)+j-1)*Nf + k
           Sigma(idx) = Sigma(idx) + conjg(coutdata(Nf/2+1-k))
@@ -165,13 +167,20 @@ module parquet_selfenergy
                 w = Pi/beta*(Two*(jw-Nf/2-1) + One)
                 wc = Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One)
                 
-                if (jw > Nf .or. jw < 1) then
+                if (jw > Nf) then
                   
-                  if (ComIdx3%iw > Nf .or. ComIdx3%iw < 1) then
+                  if (ComIdx3%iw > Nf) then
                     do jx2 = 1,Ngrain
                       do jy2 = 1,Ngrain
                         dummy2 = dummy2 + One/(xi*wc + mu - Ek_grain(icx,jx2, icy, jy2) -&
                         Sigma_H(icx,icy))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-Sigma_H(jx,jy))
+                      end do
+                    end do
+                  else if (ComIdx3%iw < 1) then
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        dummy2 = dummy2 + One/(xi*wc + mu - Ek_grain(icx,jx2, icy, jy2) -&
+                        conjg(Sigma_H(icx,icy)))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-Sigma_H(jx,jy))
                       end do
                     end do
                   else
@@ -195,12 +204,20 @@ module parquet_selfenergy
                   
                   wc = Pi/beta*(Two*(ComIdx2%iw-Nf/2-1) + One)
                   
-                  if (ComIdx2%iw > Nf .or. ComIdx2%iw < 1) then
+                  if (ComIdx2%iw > Nf ) then
                     do jx2 = 1,Ngrain
                       do jy2 = 1,Ngrain
                         
                         dummy3 = dummy3 + One/(xi*wc + mu - Ek_grain(icx,Ngrain-jx2+1, icy,Ngrain- jy2+1) - &
                         Sigma_H(icx,icy))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-Sigma_H(jx,jy))
+                      end do
+                    end do
+                  else if (ComIdx2%iw < 1) then
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        
+                        dummy3 = dummy3 + One/(xi*wc + mu - Ek_grain(icx,Ngrain-jx2+1, icy,Ngrain- jy2+1) - &
+                        conjg(Sigma_H(icx,icy)))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-Sigma_H(jx,jy))
                       end do
                     end do
                   else
@@ -214,15 +231,86 @@ module parquet_selfenergy
                   end if                           
                   
                   
-                end if
-                
-                if (jw <= Nf .and. jw >= 1) then
+                else if (jw < 1) then
                   
-                  if (ComIdx3%iw > Nf .or. ComIdx3%iw < 1) then
+                  if (ComIdx3%iw > Nf) then
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        dummy2 = dummy2 + One/(xi*wc + mu - Ek_grain(icx,jx2, icy, jy2) -&
+                        Sigma_H(icx,icy))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-conjg(Sigma_H(jx,jy)))
+                      end do
+                    end do
+                  else if (ComIdx3%iw < 1) then
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        dummy2 = dummy2 + One/(xi*wc + mu - Ek_grain(icx,jx2, icy, jy2) -&
+                        conjg(Sigma_H(icx,icy)))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-conjg(Sigma_H(jx,jy)))
+                      end do
+                    end do
+                  else
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        dummy2 = dummy2 + One/(xi*wc + mu - Ek_grain(icx,jx2, icy, jy2) - &
+                        SigmaOld(j3))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-conjg(Sigma_H(jx,jy))) 
+                      end do
+                    end do
+                    !Gkw(list_index_F(ComIdx2))
+                  end if 
+                  
+                  
+                ! Gkw(q-k')
+                  call index_minusF(map_j,  ComIdx5) ! -k' 
+                  call index_FaddB(ComIdx5, map_k1, ComIdx2) ! -k'+S(q)
+                  
+                  icx = ComIdx2%ix
+                  icy = ComIdx2%iy
+                  j3=list_index_F(ComIdx2)
+                  
+                  wc = Pi/beta*(Two*(ComIdx2%iw-Nf/2-1) + One)
+                  
+                  if (ComIdx2%iw > Nf ) then
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        
+                        dummy3 = dummy3 + One/(xi*wc + mu - Ek_grain(icx,Ngrain-jx2+1, icy,Ngrain- jy2+1) - &
+                        Sigma_H(icx,icy))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-conjg(Sigma_H(jx,jy)))
+                      end do
+                    end do
+                  else if (ComIdx2%iw < 1) then
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        
+                        dummy3 = dummy3 + One/(xi*wc + mu - Ek_grain(icx,Ngrain-jx2+1, icy,Ngrain- jy2+1) - &
+                        conjg(Sigma_H(icx,icy)))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-conjg(Sigma_H(jx,jy)))
+                      end do
+                    end do
+                  else
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        dummy3 = dummy3 + One/(xi*wc + mu - Ek_grain(icx,Ngrain-jx2+1, icy, Ngrain-jy2+1) - &
+                        SigmaOld(j3))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2)-conjg(Sigma_H(jx,jy))) 
+                      end do
+                    end do
+                    !Gkw(list_index_F(ComIdx2))
+                  end if                           
+                  
+                  
+                !end if
+                
+                else if (jw <= Nf .and. jw >= 1) then
+                  
+                  if (ComIdx3%iw > Nf) then
                     do jx2 = 1,Ngrain
                       do jy2 = 1,Ngrain
                         dummy2 = dummy2 + One/(xi*wc + mu - Ek_grain(icx,jx2, icy, jy2) - &
                         Sigma_H(icx, icy))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2) - SigmaOld(j))
+                      end do
+                    end do
+                  else if (ComIdx3%iw < 1) then
+                    do jx2 = 1,Ngrain
+                      do jy2 = 1,Ngrain
+                        dummy2 = dummy2 + One/(xi*wc + mu - Ek_grain(icx,jx2, icy, jy2) - &
+                        conjg(Sigma_H(icx, icy)))/(xi*w + mu - Ek_grain(jx,jx2, jy, jy2) - SigmaOld(j))
                       end do
                     end do
                   else
@@ -295,8 +383,10 @@ module parquet_selfenergy
                   
                   call index_FaddB(map_i, map_k1, ComIdx2) ! k+S(q)
                   
-                  if (ComIdx2%iw > Nf .or. ComIdx2%iw < 1) then
+                  if (ComIdx2%iw > Nf) then
                     dummy1 = One/(xi*Pi/beta*(Two*(ComIdx2%iw-Nf/2-1) + One) + mu - Ek(ComIdx2%ix, ComIdx2%iy)- Sigma_H(ComIdx2%ix, ComIdx2%iy) )
+                  else if (ComIdx2%iw < 1) then
+                    dummy1 = One/(xi*Pi/beta*(Two*(ComIdx2%iw-Nf/2-1) + One) + mu - Ek(ComIdx2%ix, ComIdx2%iy)- conjg(Sigma_H(ComIdx2%ix, ComIdx2%iy)) )
                   else
                     dummy1 = One/(xi*Pi/beta*(Two*(ComIdx2%iw-Nf/2-1) + One) + mu - Ek(ComIdx2%ix, ComIdx2%iy) - SigmaOld(list_index_F(ComIdx2))) 
                   end if
@@ -317,8 +407,10 @@ module parquet_selfenergy
                     call index_FaddB(ComIdx6, map_k1,ComIdx4)  ! -k+S(q)
                     call index_minusF(ComIdx4, ComIdx5) ! k-S(q)
                    
-                    if (ComIdx5%iw > Nf .or. ComIdx5%iw < 1) then
+                    if (ComIdx5%iw > Nf) then
                       dummy1 = One/(xi*Pi/beta*(Two*(ComIdx5%iw-Nf/2-1) + One) + mu - Ek(ComIdx5%ix, ComIdx5%iy) - Sigma_H(ComIdx5%ix, ComIdx5%iy) )
+                    else if (ComIdx5%iw < 1) then
+                      dummy1 = One/(xi*Pi/beta*(Two*(ComIdx5%iw-Nf/2-1) + One) + mu - Ek(ComIdx5%ix, ComIdx5%iy) - conjg(Sigma_H(ComIdx5%ix, ComIdx5%iy)) )
                     else
                       dummy1 = One/(xi*Pi/beta*(Two*(ComIdx5%iw-Nf/2-1) + One) + mu - Ek(ComIdx5%ix, ComIdx5%iy) - SigmaOld(list_index_F(ComIdx5)))!Gkw(list_index_F(ComIdx5))
                     end if
@@ -389,8 +481,10 @@ module parquet_selfenergy
                         !Gkw(k+q)
                         call index_FaddB(map_i, map_k1, ComIdx3) ! k+S(q)
                         
-                        if (ComIdx3%iw > Nf .or. ComIdx3%iw < 1) then
+                        if (ComIdx3%iw > Nf) then
                           dummy3 = One/(xi*Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One) + mu - Ek(ComIdx3%ix, ComIdx3%iy)- Sigma_H(ComIdx3%ix, ComIdx3%iy))
+                        else if (ComIdx3%iw < 1) then
+                          dummy3 = One/(xi*Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One) + mu - Ek(ComIdx3%ix, ComIdx3%iy)- conjg(Sigma_H(ComIdx3%ix, ComIdx3%iy)))
                         else
                           dummy3 = One/(xi*Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One) + mu - Ek(ComIdx3%ix, ComIdx3%iy) - SigmaOld(list_index_F(ComIdx3)))!Gkw(list_index_F(ComIdx3))
                         end if
@@ -406,8 +500,10 @@ module parquet_selfenergy
                         
                         if ( map_k%iw > 1) then
                           !time-reversal part 
-                          if (ComIdx4%iw > Nf .or. ComIdx4%iw < 1) then
+                          if (ComIdx4%iw > Nf) then
                             dummy4 = One/(xi*Pi/beta*(Two*(ComIdx4%iw-Nf/2-1) + One) + mu - Ek(ComIdx4%ix, ComIdx4%iy) - Sigma_H(ComIdx4%ix, ComIdx4%iy))
+                          else if (ComIdx4%iw < 1) then
+                            dummy4 = One/(xi*Pi/beta*(Two*(ComIdx4%iw-Nf/2-1) + One) + mu - Ek(ComIdx4%ix, ComIdx4%iy) - conjg(Sigma_H(ComIdx4%ix, ComIdx4%iy)))
                           else
                             dummy4 = One/(xi*Pi/beta*(Two*(ComIdx4%iw-Nf/2-1) + One) + mu - Ek(ComIdx4%ix, ComIdx4%iy) - SigmaOld(list_index_F(ComIdx4)))! Gkw(list_index_F(ComIdx4))
                           end if
@@ -423,8 +519,10 @@ module parquet_selfenergy
                         dummy2 = dummy2d_2(jy,jx,jw+f_range*Nf,is,k)
                         
                         ! Gkw(q-k)
-                        if (ComIdx3%iw > Nf .or. ComIdx3%iw < 1) then  ! -k+S(q)
+                        if (ComIdx3%iw > Nf) then  ! -k+S(q)
                           dummy4 = One/(xi*Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One) + mu - Ek(ComIdx3%ix, ComIdx3%iy) - Sigma_H(ComIdx3%ix, ComIdx3%iy))
+                        else if (ComIdx3%iw < 1) then  ! -k+S(q)
+                          dummy4 = One/(xi*Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One) + mu - Ek(ComIdx3%ix, ComIdx3%iy) - conjg(Sigma_H(ComIdx3%ix, ComIdx3%iy)))
                         else
                           dummy4 = One/(xi*Pi/beta*(Two*(ComIdx3%iw-Nf/2-1) + One) + mu - Ek(ComIdx3%ix, ComIdx3%iy) - SigmaOld(list_index_F(ComIdx3)))!Gkw(list_index_F(ComIdx3))
                         end if

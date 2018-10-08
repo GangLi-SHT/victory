@@ -5,12 +5,7 @@ module  parquet_util
   use math_mod
   
   implicit none
-  
-  character(len=30), parameter :: FaddB   = 'F+B'
-  character(len=30), parameter :: FaddF   = 'F+F'
-  character(len=30), parameter :: FsubF   = 'F-F'
-  character(len=30), parameter :: MinusF  = '-F'
-  character(len=30), parameter :: MinusB  = '-B'
+
   character(len=30), parameter :: Bosonic   = 'Bosonic'
   character(len=30), parameter :: Fermionic = 'Fermionic'
   character(len=30), parameter :: Square = 'Square'
@@ -183,7 +178,7 @@ module  parquet_util
       call error_msg('The allocated total num. of CPU is not compatible for parallization.')
     else
       if (id == master) then
-        write(*, '(a,i4,a)'), 'each node gets ', Nb, ' copies of Nc*Nf data.'
+        write(*, '(a,i4,a)'), 'each core gets ', Nb, ' copies of Nc*Nf data.'
       end if
     end if
 
@@ -253,10 +248,10 @@ module  parquet_util
       Ek_grain = Zero
       do ix = 1, Nx
         do ix2 = 1,Ngrain
-          kx = dkx*(ix-1) + (ix2-(Ngrain+1)/2)*dkx/dble(Ngrain+1)
+          kx = dkx*(ix-1) + (ix2-(Ngrain+1)/2)*dkx/dble(Ngrain)
           do iy = 1, Ny
             do iy2 = 1,Ngrain
-              ky = dky*(iy-1)+(iy2-(Ngrain+1)/2)*dky/dble(Ngrain+1)
+              ky = dky*(iy-1)+(iy2-(Ngrain+1)/2)*dky/dble(Ngrain)
               
               !Ek_grain(ix,ix2,iy,iy2) = Ek(ix, iy) 
               if (Nx > 1) Ek_grain(ix,ix2,iy,iy2) = Ek_grain(ix,ix2,iy,iy2)- Two*cos(kx)
@@ -270,11 +265,11 @@ module  parquet_util
       if (.NOT. allocated(Sigma_H)) allocate(Sigma_H(Nx, Ny))
       Sigma_H = Zero
       
-      if (.NOT. allocated(C_wave_x)) allocate(C_wave_x(4*Nx+15))
-      if (.NOT. allocated(C_wave_y)) allocate(C_wave_y(4*Ny+15))   
+      if (.NOT. allocated(C_wave_x)) allocate(C_wave_x(4*Nx*Ngrain+15))
+      if (.NOT. allocated(C_wave_y)) allocate(C_wave_y(4*Ny*Ngrain+15))   
       
-      call Zffti(Nx, C_wave_x)
-      call Zffti(Ny, C_wave_y)
+      call Zffti(Nx*Ngrain, C_wave_x)
+      call Zffti(Ny*Ngrain, C_wave_y)
       
       ! allocate arrays for the local fully irreducible vertex in each node
       if (.NOT. allocated(L_d)) allocate(L_d(Nf, Nf, Nf/2))
@@ -369,7 +364,278 @@ module  parquet_util
    end subroutine readin
   !------------------------------------------------------------------------------
   
+    !-------------------------------------------------------
+  subroutine pa_Gkw_Chi0_IBZ(ite, Grt)
+    !
+    ! Purpose
+    ! =======
+    !   Generate the full Green's function. The bubble diagram of two convoluted Green's function are then 
+    !   calculated from the Fourier-Transformed Gkw, i.e. Grt. The inverse Fourier
+    !   transform is carried out by using the supplementation of spline interpolation.
+    !
+    ! Notation
+    ! ========
+    !   fermionic frequency: k=[1, Nf] -> v = Pi/beta* (Two*(k-Nf/2-1) + One)
+    !   bosonic   frequency: k=[1, Nf] -> w = Pi/beta* Two*(k-Nf/2)
+    !
+    ! Returned values
+    ! ===============
+    !   Gkw and Chi0_ph, Chi0_pp will be updated
+    !
+    integer,     intent(in)  :: ite          ! loop index
+    complex(dp), intent(out) :: Grt(Nx*Ngrain, Ny*Ngrain, Nf)
     
+    ! ... local vars ...
+    integer     :: i, j, k, idx, iTau, itemp, ix2, iy2, idx1, idx2
+    integer     :: i1, j1
+    real(dp)    :: t1, t2, t3, mu_UpperBound, mu_LowerBound
+    !real(dp)    :: dkx, dky, kx, ky,
+    real(dp)    :: w, tau, dummy, FD1, FD2
+    complex(dp) :: dummy1D(Nf), coutdata(Nf/2)
+    complex(dp) :: Gkw(Nx*Ngrain, Ny*Ngrain, Nf)           ! Green's function
+    complex(dp) :: Chi0rt_ph(Nx*Ngrain, Ny*Ngrain, Nf), Chi0rt_pp(Nx*Ngrain, Ny*Ngrain, Nf)
+    character(len=30) :: FLE, str1
+    character(len=10) :: Mtype
+        
+    if (.NOT. allocated(Sigma))   allocate(Sigma(Nt))
+    if (ite == 1) then 
+      
+      if (Sigma_ini) then
+        open(unit=1, file='Sigma_ini.dat', status='old')
+        do i = 1, Nx
+          do j = 1, Ny
+            do k = 1, Nf
+              idx = (Ny*(i-1)+j-1)*Nf + k
+              read(1, *) itemp, itemp, t1, t2, t3
+              Sigma(idx) = dcmplx(t2, t3)    
+            end do
+          end do
+        end do
+        close(1)
+      else 
+        Sigma = Zero
+      end if
+      
+    end if
+    
+    if (No_sigma_update) then
+      if (.NOT. allocated(Sigma_compare))   allocate(Sigma_compare(Nt))   
+      
+      Sigma_compare = Sigma
+      
+      do i = 1, Nx
+        do j = 1, Ny
+          do k = 1, Nf
+            idx = (Ny*(i-1)+j-1)*Nf + k
+            Sigma(idx) = Sigma_DMFT(k)
+          end do
+        end do
+      end do    
+      
+    end if
+    
+    do i = 1, Nx
+      do j = 1, Ny
+        idx = (Ny*(i-1)+j)*Nf
+        Sigma_H(i, j) = Sigma(idx)
+        if (id == master) write(*, "('Hartree energy for', 2i4, ' is', 2f12.6 )") i, j, Sigma_H(i, j)
+      end do
+    end do    
+    
+    ! --- first to adjust the chemical potential ---
+    mu_UpperBound = mu + xU
+    mu_LowerBound = mu - xU
+    mu = Zero
+    
+111 continue
+    !dkx = Two*Pi/Nx
+    !dky = Two*Pi/Ny
+    do i = 1, Nx
+      do j = 1, Ny
+        do ix2 = 1, Ngrain
+          do iy2 = 1, Ngrain
+            do k = 1, Nf
+             w   = Pi/beta*(Two*(k-Nf/2-1)+One)
+             idx = (Ny*(i-1)+j-1)*Nf + k
+             
+             idx1= (i-1)*Ngrain + (ix2-(Ngrain+1)/2) + 1
+             if (idx1 < 1) idx1 = idx1 + Ngrain*Nx
+             
+             idx2= (j-1)*Ngrain + (iy2-(Ngrain+1)/2) + 1
+             if (idx2 < 1) idx2 = idx2 + Ngrain*Ny
+             
+             !if (Nc == 1) then
+             ! we switch off single-site functionality
+                !Gkw(1,1,k) = One/(xi*w + mu - Delta(k) - Sigma(k))
+             !else                
+             Gkw(idx1,idx2,k) = One/(xi*w + mu - Ek_grain(i,ix2, j,iy2) - Sigma(idx))
+             !end if
+             dummy1D(k) = (Gkw(idx1,idx2,k) - One/(xi*w + mu - Ek_grain(i,ix2, j,iy2))) 
+            end do
+          ! Fourier transform from w -> tau space with the supplemented
+          ! function (non-interacting Green's function).
+            do iTau = 1, Nf
+             tau = beta/(Nf-1)*(iTau-1)
+             dummy = Zero
+             do k = 1, Nf
+                w = Pi/beta*(Two*(k-Nf/2)-One)
+                dummy = dummy + dble( exp(-xi*w*tau)*dummy1D(k) )/beta
+             end do
+             Grt(idx1, idx2, iTau) = dummy - &
+             exp((beta-tau)*(Ek_grain(i,ix2,j,iy2)-mu))/(One + exp(beta*(Ek_grain(i,ix2, j,iy2)-mu)))
+            end do !iTau   
+          end do !iy2
+        end do !ix2
+      end do !j
+    end do !i
+
+    ! FFT from k to r space.
+    do k = 1, Nf
+       call fftf2d(Nx*Ngrain, Ny*Ngrain, Grt(1:Nx*Ngrain, 1:Ny*Ngrain, k), C_wave_x, C_wave_y)
+    end do
+
+    t1 = -Two*Grt(1, 1, Nf)
+
+    if (id == master) write(*, "(' particle number is:', f12.6, ' chemical potential is', f12.6)") t1, mu
+    if (abs(t1 - nParticle) > 1.d-4) then
+       if (t1 > nParticle) then
+          mu_UpperBound = mu
+       else
+          mu_LowerBound = mu
+       end if
+       mu = Half*(mu_UpperBound + mu_LowerBound)
+       goto 111
+    end if
+   
+    ! output the Green's function in k-w space
+    if (id == master) then
+       write(str1, '(I0.3)') ite
+       FLE = 'Gkw-'//trim(str1)//'.dat'
+       open(unit=1, file=FLE, status='unknown')    
+       do i = 1, Nx
+          !kx = dkx*(i-1)
+          idx1= (i-1)*Ngrain +  1
+          do j = 1, Ny
+             !  ky = dky*(j-1)
+             idx2= (j-1)*Ngrain +  1
+             do k = 1, Nf
+                write(1, '(2i4, 3f20.12)') i, j, Pi/beta*(Two*(k-Nf/2)-One), Gkw(idx1,idx2,k)
+             end do
+             write(1, *)
+          end do
+       end do
+       close(1)
+       
+       ! output the Green's function in r-t space
+       FLE = 'Grt-'//trim(str1)//'.dat'
+       open(unit=1, file=FLE, status='unknown')
+       do i = 1, Nx
+          do j = 1, Ny
+             do k = 1, Nf
+                write(1, '(2i4, 3f20.12)') i, j, beta/(Nf-1)*(k-1), Grt(i, j, k)
+             end do
+             write(1, *)
+          end do
+       end do
+       close(1)
+    end if    
+
+    !
+    ! Now, determine the bubble diagram of two convoluted Green's function, which will be 
+    ! used to approximate the reducible vertex in each channel for components that are not 
+    ! avaliable from the updated complete- and irreducible-vertex in this channel.
+    !
+    if (.NOT. allocated(Chi0_ph)) allocate(Chi0_ph(Nred))
+    if (.NOT. allocated(Chi0_pp)) allocate(Chi0_pp(Nred))
+    
+    ! --- particle-hole bubble ---
+    do k = 1, Nf
+      do idx1 = 1, Nx*Ngrain
+        if (idx1 == 1) then
+          i1 = idx1
+        else
+          i1 = Nx*Ngrain- idx1 +2
+        end if
+        
+        do idx2 = 1, Ny*Ngrain
+          if (idx2 == 1) then
+            j1 = 1
+          else
+            j1 = Ny*Ngrain- idx2 +2
+          end if
+          Chi0rt_ph(idx1, idx2, k) = -Grt(idx1, idx2, k)*Grt(i1, j1, Nf-k+1)     
+        end do
+      end do
+      call fftb2d(Nx*Ngrain, Ny*Ngrain, Chi0rt_ph(1:Nx*Ngrain, 1:Ny*Ngrain, k), C_wave_x, C_wave_y)
+    end do
+    
+    Mtype = 'Bosonic'
+    do i = 1, Nx_IBZ
+      idx1 = (i-1)*Ngrain +  1
+      do j = 1, i
+        idx2 = (j-1)*Ngrain +  1
+        do k = 1, Nf
+          dummy1D(k) = Chi0rt_ph(idx1, idx2, k) 
+        end do
+        call FDfit(Nf, dble(dummy1D), beta/dble(Nf-1), FD1, FD2)
+        call nfourier(Mtype, Nf-1, Nf/2, FD1, FD2, dble(dummy1D), coutdata)
+        do k = 1, Nf/2
+          idx = ((i*(i-1))/2+j-1)*Nf/2 + k
+          Chi0_ph(idx) = coutdata(k)
+        end do
+      end do
+    end do
+    
+    ! --- particle-particle bubble ---
+    do k = 1, Nf
+      do idx1 = 1, Nx*Ngrain
+        do idx2 = 1, Ny*Ngrain
+          Chi0rt_pp(idx1, idx2, k) = -Half*Grt(idx1, idx2, k)**2
+        end do
+      end do
+      call fftb2d(Nx*Ngrain, Ny*Ngrain, Chi0rt_pp(1:Nx*Ngrain, 1:Ny*Ngrain, k), C_wave_x, C_wave_y)
+    end do
+    
+    do i = 1, Nx_IBZ
+      idx1 = (i-1)*Ngrain + 1
+      do j = 1, i
+        idx2 = (j-1)*Ngrain +  1
+        do k = 1, Nf
+          dummy1D(k) = Chi0rt_pp(idx1, idx2, k)    
+        end do
+        
+        call FDfit(Nf, dble(dummy1D), beta/dble(Nf-1), FD1, FD2)
+        call nfourier(Mtype, Nf-1, Nf/2, FD1, FD2, dble(dummy1D), coutdata)
+        
+        do k = 1, Nf/2
+          idx = ((i*(i-1))/2+j-1)*Nf/2 + k
+          Chi0_pp(idx) = coutdata(k)
+        end do          
+      end do
+    end do
+    
+    !--- monitoring the bubble results ---
+    if (id == master) then
+      FLE = 'Chi0-'//trim(str1)//'.dat'
+      open(unit=1, file=FLE, status='unknown')
+      do i = 1, Nx_IBZ
+        !kx = dkx*(i-1)
+        do j = 1, i
+          !ky = dky*(j-1)
+          do k = 1, Nf/2
+            idx = ((i*(i-1))/2+j-1)*Nf/2 + k
+            write(1, '(2i4, 5f12.6)') i, j, Pi/beta*Two*(k-1), &
+                  Chi0_ph(idx), Chi0_pp(idx) 
+          end do
+          write(1, *)
+        end do
+      end do
+      close(1)
+    end if
+    
+  end subroutine pa_Gkw_Chi0_IBZ
+  !------------------------------------------------------------------------------  
+  
   !------------------------------------------------------------------------------
   subroutine list_symmetries(typ, map, symm_list)
     
@@ -438,6 +704,86 @@ module  parquet_util
     
   end subroutine list_symmetries
   !------------------------------------------------------------------------------
+  
+  subroutine check_sym(i_in, i_sym, i_out)
+
+    integer, intent(out) :: i_sym
+    type(indxmap), intent(in) :: i_in
+    type(indxmap), intent(out) :: i_out
+    
+    integer kx, ky, kw, jx, jy
+    
+    !---------Purpose-------------
+    !  This subroutine checks inverse of which symmetry operation needs to be performed
+    !  to bring the momentum from full BZ into IBZ and performs this inverse operation on i_in
+    !
+    !  1  idetity
+    !  2  (kx,ky) -> (kx,-ky)
+    !  3  (kx,ky) -> (-kx,ky)
+    !  4  (kx,ky) -> (-kx,-ky)
+    !  5  (kx,ky) -> (ky,kx)
+    !  6  (kx,ky) -> (ky,-kx) inv of 8
+    !  7  (kx,ky) -> (-ky,-kx)
+    !  8  (kx,ky) -> (-ky, kx) inv of 6
+
+    kx = i_in%ix
+    ky = i_in%iy
+    kw = i_in%iw
+    
+    if (kx >= ky) then
+        if (kx <= Nx_IBZ) then 
+            i_sym = 1 
+            i_out = i_in            
+        else if (ky >= Nx_IBZ) then
+            i_sym = 7
+            jx= -ky + Ny + 2
+            if (jx > Nx) jx = jx - Nx
+            jy= -kx + Nx + 2
+            if (jy > Ny) jy = jy - Ny
+            i_out=indxmap(jx,jy,kw)    
+        else if (ky >= Nx + 2 - kx) then
+            i_sym = 8
+            jx = ky
+            jy= -kx + Nx + 2
+            if (jy > Ny) jy = jy - Ny
+            i_out=indxmap(jx,jy,kw)        
+        else 
+            i_sym = 3
+            jx = -kx + Nx + 2
+            if (jx > Nx) jx = jx - Nx
+            jy = ky
+            i_out=indxmap(jx,jy,kw)
+        end if                
+    else if (kx < ky) then                        
+        if (kx >= Nx_IBZ) then 
+            i_sym = 4
+            jx = -kx + Nx + 2
+            if (jx > Nx) jx = jx - Nx
+            jy = -ky + Ny + 2
+            if (jy > Ny) jy = jy - Ny
+            i_out=indxmap(jx,jy,kw)        
+        else if (ky <= Nx_IBZ) then 
+            i_sym = 5
+            jx = ky
+            jy = kx
+            i_out=indxmap(jx,jy,kw)
+        else if (kx >= Ny + 2 - ky) then
+            i_sym = 2        
+            jx = kx
+            jy = -ky + Ny + 2
+            if (jy > Ny) jy = jy - Ny
+            i_out=indxmap(jx,jy,kw)            
+        else 
+            i_sym = 6     
+            jx= -ky + Ny + 2
+            if (jx > Nx) jx = jx - Nx
+            jy = kx
+            i_out=indxmap(jx,jy,kw)
+        end if                       
+    end if      
+    
+end subroutine check_sym
+  
   
   !------------------------------------------------------------------------------
   subroutine symmetry_operation(typ, i_sym, i_in, i_out)
@@ -662,61 +1008,6 @@ module  parquet_util
   end function list_index_B
   !------------------------------------------------------------------------------
   
-  !------------------------------------------------------------------------------
-  subroutine index_operation(idx1, idx2, operation, final_Indx)
-    ! This function is obsolete in victory 1.1
-    !
-    ! Purpose
-    ! =======
-    !  For given two index in the complete list, find out the resulting index for
-    !  given operation.
-    !
-
-    
-    type(Indxmap), intent(in)     :: idx1, idx2
-    character(len=30), intent(in) :: operation
-    type(Indxmap), intent(out)    :: final_Indx
-    
-    ! ... local vars ...
-    integer :: i, j, k
-    
-    if (Trim(operation) == FaddB) then 
-      i = idx1%ix + idx2%ix - 1
-      if (i > Nx) i = i - Nx
-      j = idx1%iy + idx2%iy - 1
-      if (j > Ny) j = j - Ny
-      k = idx1%iw + idx2%iw - 1      
-      final_Indx = indxmap(i, j, k)
-    end if
-    
-    if (Trim(operation) == FaddF) then
-      i = idx1%ix + idx2%ix - 1
-      if (i > Nx) i = i - Nx
-      j = idx1%iy + idx2%iy - 1
-      if (j > Ny) j = j - Ny
-      k = idx1%iw + idx2%iw - Nf 
-      final_Indx = indxmap(i, j, k)
-    end if
-    
-    if (Trim(operation) == MinusF) then
-      i = -idx1%ix + Nx + 2
-      if (i > Nx) i = i - Nx
-      j = -idx1%iy + Ny + 2
-      if (j > Ny) j = j - Ny
-      k = -idx1%iw + Nf + 1
-      final_Indx = indxmap(i, j, k)
-    end if
-    
-    if (Trim(operation) == MinusB) then
-      i = -idx1%ix + Nx + 2
-      if (i > Nx) i = i - Nx
-      j = -idx1%iy + Ny + 2
-      if (j > Ny) j = j - Ny
-      k = -idx1%iw + 2
-      final_indx = indxmap(i, j, k)
-    end if
-  end subroutine index_operation
-  !-------------------------------------------------------
   
   !-------------------------------------------------------
   subroutine index_FaddB(idx1, idx2, final_Indx)
@@ -742,6 +1033,32 @@ module  parquet_util
   end subroutine index_FaddB
   !-------------------------------------------------------
   
+  !-------------------------------------------------------
+  subroutine index_FaddF(idx1, idx2, final_Indx)
+    !
+    ! Purpose
+    ! =======
+    !  For given two index in the complete list, find out the resulting index for
+    !  given operation.
+    !
+    type(Indxmap), intent(in)     :: idx1, idx2
+    type(Indxmap), intent(out)    :: final_Indx
+    
+    ! ... local vars ...
+    integer :: i, j, k
+    
+  
+    i = idx1%ix + idx2%ix - 1
+    if (i > Nx) i = i - Nx
+    j = idx1%iy + idx2%iy - 1
+    if (j > Ny) j = j - Ny
+    k = idx1%iw + idx2%iw - Nf 
+    final_Indx = indxmap(i, j, k)    
+
+   
+  end subroutine index_FaddF
+  !------------------------------------------------------- 
+
   !-------------------------------------------------------
   subroutine index_minusF(idx1, final_Indx)
     !
@@ -788,262 +1105,7 @@ module  parquet_util
     
   end subroutine index_minusB
   !-------------------------------------------------------
-  !-------------------------------------------------------
-  subroutine pa_Gkw_Chi0_IBZ(ite, Grt)
-    !
-    ! Purpose
-    ! =======
-    !   Generate the full Green's function. The bubble diagram of two convoluted Green's function are then 
-    !   calculated from the Fourier-Transformed Gkw, i.e. Grt. The inverse Fourier
-    !   transform is carried out by using the supplementation of spline interpolation.
-    !
-    ! Notation
-    ! ========
-    !   fermionic frequency: k=[1, Nf] -> v = Pi/beta* (Two*(k-Nf/2-1) + One)
-    !   bosonic   frequency: k=[1, Nf] -> w = Pi/beta* Two*(k-Nf/2)
-    !
-    ! Returned values
-    ! ===============
-    !   Gkw and Chi0_ph, Chi0_pp will be updated
-    !
-    integer,     intent(in)  :: ite          ! loop index
-    complex(dp), intent(out) :: Grt(Nx, Ny, Nf)
-    
-    ! ... local vars ...
-    integer     :: i, j, k, idx, iTau, itemp
-    integer     :: i1, j1
-    real(dp)    :: t1, t2, t3, mu_UpperBound, mu_LowerBound
-    real(dp)    :: dkx, dky, kx, ky, w, tau, dummy, FD1, FD2
-    complex(dp) :: dummy1D(Nf), coutdata(Nf/2)
-    complex(dp) :: Gkw(Nt)           ! Green's function
-    complex(dp) :: Chi0rt_ph(Nx, Ny, Nf), Chi0rt_pp(Nx, Ny, Nf)
-    character(len=30) :: FLE, str1
-    character(len=10) :: Mtype
-    
-    !if (.NOT. allocated(Gkw))     allocate(Gkw(Nt))
-    ! In version 1.1 Gkw is obsolete; Sigma is used directly
-    
-    if (.NOT. allocated(Sigma))   allocate(Sigma(Nt))
-    if (ite == 1) then 
-      
-      if (Sigma_ini) then
-        open(unit=1, file='Sigma_ini.dat', status='old')
-        do i = 1, Nx
-          do j = 1, Ny
-            do k = 1, Nf
-              idx = (Ny*(i-1)+j-1)*Nf + k
-              read(1, *) itemp, itemp, t1, t2, t3
-              Sigma(idx) = dcmplx(t2, t3)    
-            end do
-          end do
-        end do
-        close(1)
-      else 
-        Sigma = Zero
-      end if
-      
-    end if
-    
-    if (No_sigma_update) then
-      if (.NOT. allocated(Sigma_compare))   allocate(Sigma_compare(Nt))   
-      
-      Sigma_compare = Sigma
-      
-      do i = 1, Nx
-        do j = 1, Ny
-          do k = 1, Nf
-            idx = (Ny*(i-1)+j-1)*Nf + k
-            Sigma(idx) = Sigma_DMFT(k)
-          end do
-        end do
-      end do    
-      
-    end if
-    
-    do i = 1, Nx
-      do j = 1, Ny
-        idx = (Ny*(i-1)+j)*Nf
-        Sigma_H(i, j) = Sigma(idx)
-        if (id == master) write(*, "('Hartree energy for', 2i4, ' is', 2f12.6 )") i, j, Sigma_H(i, j)
-      end do
-    end do    
-    
-    ! --- first to adjust the chemical potential ---
-    mu_UpperBound = mu + xU
-    mu_LowerBound = mu - xU
-    mu = Zero
-    
-111 continue
-    dkx = Two*Pi/Nx
-    dky = Two*Pi/Ny
-    do i = 1, Nx
-       do j = 1, Ny
-          do k = 1, Nf
-             w   = Pi/beta*(Two*(k-Nf/2-1)+One)
-             idx = (Ny*(i-1)+j-1)*Nf + k
-             if (Nc == 1) then
-                Gkw(k) = One/(xi*w + mu - Delta(k) - Sigma(k))
-             else                
-                Gkw(idx) = One/(xi*w + mu - Ek(i, j) - Sigma(idx))
-             end if
-             dummy1D(k) = (Gkw(idx) - One/(xi*w + mu - Ek(i, j)))  ! Ek is zero when Nc = 1
-          end do
-          ! Fourier transform from w -> tau space with the supplemented
-          ! function (non-interacting Green's function).
-          do iTau = 1, Nf
-             tau = beta/(Nf-1)*(iTau-1)
-             dummy = Zero
-             do k = 1, Nf
-                w = Pi/beta*(Two*(k-Nf/2)-One)
-                dummy = dummy + dble( exp(-xi*w*tau)*dummy1D(k) )/beta
-             end do
-             Grt(i, j, iTau) = dummy - exp((beta-tau)*(Ek(i, j)-mu))/(One + exp(beta*(Ek(i, j)-mu)))
-          end do
-       end do
-    end do
 
-    ! FFT from k to r space.
-    do k = 1, Nf
-       call fftf2d(Nx, Ny, Grt(1:Nx, 1:Ny, k), C_wave_x, C_wave_y)
-    end do
-
-    t1 = -Two*Grt(1, 1, Nf)
-
-    if (id == master) write(*, "(' particle number is:', f12.6, ' chemical potential is', f12.6)") t1, mu
-    if (abs(t1 - nParticle) > 1.d-4) then
-       if (t1 > nParticle) then
-          mu_UpperBound = mu
-       else
-          mu_LowerBound = mu
-       end if
-       mu = Half*(mu_UpperBound + mu_LowerBound)
-       goto 111
-    end if
-   
-    ! output the Green's function in k-w space
-    if (id == master) then
-       write(str1, '(I0.3)') ite
-       FLE = 'Gkw-'//trim(str1)//'.dat'
-       open(unit=1, file=FLE, status='unknown')    
-       do i = 1, Nx
-          kx = dkx*(i-1)
-          do j = 1, Ny
-             ky = dky*(j-1)
-             do k = 1, Nf
-                idx = (Ny*(i-1)+j-1)*Nf + k
-                write(1, '(2f12.6, 3f20.12)') kx, ky, Pi/beta*(Two*(k-Nf/2)-One), Gkw(idx)
-             end do
-             write(1, *)
-          end do
-       end do
-       close(1)
-       
-       ! output the Green's function in r-t space
-       FLE = 'Grt-'//trim(str1)//'.dat'
-       open(unit=1, file=FLE, status='unknown')
-       do i = 1, Nx
-          do j = 1, Ny
-             do k = 1, Nf
-                write(1, '(2i4, 3f20.12)') i, j, beta/(Nf-1)*(k-1), Grt(i, j, k)
-             end do
-             write(1, *)
-          end do
-       end do
-       close(1)
-    end if    
-
-    !
-    ! Now, determine the bubble diagram of two convoluted Green's function, which will be 
-    ! used to approximate the reducible vertex in each channel for components that are not 
-    ! avaliable from the updated complete- and irreducible-vertex in this channel.
-    !
-    if (.NOT. allocated(Chi0_ph)) allocate(Chi0_ph(Nred))
-    if (.NOT. allocated(Chi0_pp)) allocate(Chi0_pp(Nred))
-    
-    ! --- particle-hole bubble ---
-    do k = 1, Nf
-      do i = 1, Nx
-        if (i == 1) then
-          i1 = i
-        else
-          i1 = Nx-i+2
-        end if
-        
-        do j = 1, Ny
-          if (j == 1) then
-            j1 = 1
-          else
-            j1 = Ny-j+2
-          end if
-          Chi0rt_ph(i, j, k) = -Grt(i, j, k)*Grt(i1, j1, Nf-k+1)     
-        end do
-      end do
-      call fftb2d(Nx, Ny, Chi0rt_ph(1:Nx, 1:Ny, k), C_wave_x, C_wave_y)
-    end do
-    
-    Mtype = 'Bosonic'
-    do i = 1, Nx_IBZ
-      do j = 1, i
-        do k = 1, Nf
-          dummy1D(k) = Chi0rt_ph(i, j, k) 
-        end do
-        call FDfit(Nf, dble(dummy1D), beta/dble(Nf-1), FD1, FD2)
-        call nfourier(Mtype, Nf-1, Nf/2, FD1, FD2, dble(dummy1D), coutdata)
-        do k = 1, Nf/2
-          idx = ((i*(i-1))/2+j-1)*Nf/2 + k
-          Chi0_ph(idx) = coutdata(k)
-        end do
-      end do
-    end do
-    
-    ! --- particle-particle bubble ---
-    do k = 1, Nf
-      do i = 1, Nx
-        do j = 1, Ny
-          Chi0rt_pp(i, j, k) = -Half*Grt(i, j, k)**2
-        end do
-      end do
-      call fftb2d(Nx, Ny, Chi0rt_pp(1:Nx, 1:Ny, k), C_wave_x, C_wave_y)
-    end do
-    
-    do i = 1, Nx_IBZ
-      do j = 1, i
-        do k = 1, Nf
-          dummy1D(k) = Chi0rt_pp(i, j, k)    
-        end do
-        
-        call FDfit(Nf, dble(dummy1D), beta/dble(Nf-1), FD1, FD2)
-        call nfourier(Mtype, Nf-1, Nf/2, FD1, FD2, dble(dummy1D), coutdata)
-        
-        do k = 1, Nf/2
-          idx = ((i*(i-1))/2+j-1)*Nf/2 + k
-          Chi0_pp(idx) = coutdata(k)
-        end do          
-      end do
-    end do
-    
-    !--- monitoring the bubble results ---
-    if (id == master) then
-      FLE = 'Chi0-'//trim(str1)//'.dat'
-      open(unit=1, file=FLE, status='unknown')
-      do i = 1, Nx_IBZ
-        kx = dkx*(i-1)
-        do j = 1, i
-          ky = dky*(j-1)
-          do k = 1, Nf/2
-            idx = ((i*(i-1))/2+j-1)*Nf/2 + k
-            write(1, '(2f12.6, 5f12.6)') kx, ky, Pi/beta*Two*(k-1), &
-                  Chi0_ph(idx), Chi0_pp(idx) 
-          end do
-          write(1, *)
-        end do
-      end do
-      close(1)
-    end if
-    
-  end subroutine pa_Gkw_Chi0_IBZ
-  !------------------------------------------------------------------------------
-    
   !------------------------------------------------------------------------------
   subroutine output_2k(data1, data2, k, name, unt)
     !

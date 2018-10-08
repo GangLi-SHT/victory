@@ -64,12 +64,20 @@ module Parquet_kernel
               w = Pi/beta*(Two*(iw-Nf/2-1) + One)
               wc = Pi/beta*(Two*(icw-Nf/2-1) + One)
               
-              if (icw > Nf .or. icw < 1) then
+              if (icw > Nf) then
                 do iy2 = 1,Ngrain
                   do ix2 = 1,Ngrain
                     ! use the non-interacting Green's function when k+q is outside of the box
                       dummy = dummy + One/(xi*wc + mu - Ek_grain(icx,ix2, icy, iy2) - &
                       Sigma_H(icx,icy))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
+                  end do
+                end do
+              else if (icw < 1) then
+                do iy2 = 1,Ngrain
+                  do ix2 = 1,Ngrain
+                    ! use the non-interacting Green's function when k+q is outside of the box
+                      dummy = dummy + One/(xi*wc + mu - Ek_grain(icx,ix2, icy, iy2) - &
+                      conjg(Sigma_H(icx,icy)))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
                   end do
                 end do
               else
@@ -120,12 +128,20 @@ module Parquet_kernel
               w = Pi/beta*(Two*(iw-Nf/2-1) + One)
               wc = Pi/beta*(Two*(icw-Nf/2-1) + One)
               
-              if (icw > Nf .or. icw < 1) then
+              if (icw > Nf ) then
                 do iy2 = 1,Ngrain
                   do ix2 = 1,Ngrain
                     ! use the non-interacting Green's function when k+q is outside of the box
                     dummy = dummy + One/(xi*wc + mu - Ek_grain(icx,ix2, icy, iy2)- &
                     Sigma_H(icx,icy))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
+                  end do
+                end do
+              else if (icw < 1) then
+                do iy2 = 1,Ngrain
+                  do ix2 = 1,Ngrain
+                    ! use the non-interacting Green's function when k+q is outside of the box
+                    dummy = dummy + One/(xi*wc + mu - Ek_grain(icx,ix2, icy, iy2)- &
+                    conjg(Sigma_H(icx,icy)))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
                   end do
                 end do
               else
@@ -213,12 +229,20 @@ module Parquet_kernel
               w = Pi/beta*(Two*(iw-Nf/2-1) + One)
               wc = Pi/beta*(Two*(icw-Nf/2-1) + One)
               
-              if (icw > Nf .or. icw < 1) then
+              if (icw > Nf) then
                 do iy2 = 1,Ngrain
                   do ix2 = 1,Ngrain
                     ! use the non-interacting green's function when q-k is outside the box
                     dummy = dummy + One/( xi*wc + mu - Ek_grain(icx,Ngrain-ix2+1, icy,Ngrain-iy2+1) -&
                     Sigma_H(icx,icy))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
+                  end do
+                end do
+              else if (icw < 1) then
+                do iy2 = 1,Ngrain
+                  do ix2 = 1,Ngrain
+                    ! use the non-interacting green's function when q-k is outside the box
+                    dummy = dummy + One/( xi*wc + mu - Ek_grain(icx,Ngrain-ix2+1, icy,Ngrain-iy2+1) -&
+                    conjg(Sigma_H(icx,icy)))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
                   end do
                 end do
               else
@@ -268,13 +292,20 @@ module Parquet_kernel
               w = Pi/beta*(Two*(iw-Nf/2-1) + One)
               wc = Pi/beta*(Two*(icw-Nf/2-1) + One)
               
-              if (icw > Nf .or. icw < 1) then
-                
+              if (icw > Nf) then                
                 do iy2 = 1,Ngrain
                   do ix2 = 1,Ngrain
                     ! use the non-interacting green's function when q-k is outside the box
                     dummy = dummy + One/( xi*wc + mu - Ek_grain(icx,Ngrain-ix2+1, icy,Ngrain-iy2+1) -&
                     Sigma_H(icx,icy))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
+                  end do
+                end do
+              else if (icw < 1) then                
+                do iy2 = 1,Ngrain
+                  do ix2 = 1,Ngrain
+                    ! use the non-interacting green's function when q-k is outside the box
+                    dummy = dummy + One/( xi*wc + mu - Ek_grain(icx,Ngrain-ix2+1, icy,Ngrain-iy2+1) -&
+                    conjg(Sigma_H(icx,icy)))/( xi*w + mu - Ek_grain(ix,ix2, iy, iy2) -Sigma(i))
                   end do
                 end do
               else
@@ -512,18 +543,33 @@ module Parquet_kernel
     type(Indxmap),    intent(in) :: k1, k2, q
     
     ! ... local vars ...
-    integer       :: ic, jc, iw, jw, qw, idx, idx1 
-    type(Indxmap) :: k1_, k2_, q_
+    integer       :: ic, jc, iw, jw, qw, idx, idx1, is 
+    type(Indxmap) :: k1_, k2_, q_, k1_1, k2_1, q_1
     complex(dp)   :: background
     
     if (q%iw > 0) then
-      k1_ = k1
-      k2_ = k2
-      q_ = q
+      k1_1 = k1
+      k2_1 = k2
+      q_1 = q
     else
-      call index_minusF(k1, K1_)
-      call index_minusF(k2, K2_)
-      call index_minusB(q, q_)
+      call index_minusF(k1, k1_1)
+      call index_minusF(k2, k2_1)
+      call index_minusB(q, q_1)
+    end if
+    
+    kernel = Zero
+    
+    if (q_1%iw > Nf/2) return
+    
+    call check_sym(q_1,is,q_)
+    
+    if (is == 1) then
+      k1_ = k1_1
+      k2_ = k2_1
+    
+    else
+      call symmetry_operation_inv(lattice_type, is, k1_1, k2_1, k1_, k2_)
+    
     end if
     
     ic = (k1_%ix-1)*Ny+k1_%iy
@@ -536,9 +582,7 @@ module Parquet_kernel
     idx  = ((k1_%ix-1)*Ny+k1_%iy)*Nf
     idx1 = ((k1_%ix-1)*Ny+k1_%iy-1)*Nf+1 
     
-    kernel = Zero
-    
-    if (qw > Nf/2) return
+
     
     select case (channel)
       case ('d')  ! At the moment only Edge_scan is available

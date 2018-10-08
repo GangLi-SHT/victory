@@ -27,7 +27,7 @@ program main
   
   call readin
   
-  allocate(Grt(Nx, Ny, Nf))
+  allocate(Grt(Nx*Ngrain, Ny*Ngrain, Nf))
   ! ------------------- start the self-consisent loop ----------------------
   Converged = .False.
   ite = 1
@@ -82,7 +82,7 @@ program main
   
   
   ! ------------------- clean the memory -----------------------------------
-  !call MPI_barrier(MPI_COMM_WORLD, rc) !not needed
+  call MPI_barrier(MPI_COMM_WORLD, rc) !probably not needed
   call Memory_Release
   
   ! ------------------- finalize the mpi enviroment ------------------------
