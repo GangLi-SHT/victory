@@ -7,7 +7,7 @@ Victory is an efficient implementation of the Parquet equation for the single-ba
 
 (2) Single-band Hubbard model on ladder, square, and triangluar lattices. 
 
-(3) Efficient use of memory, currently a 4 x 4 square lattice study is feasible.
+(3) Efficient use of memory, currently a 8 x 8 square lattice study is possible.
 
 (4) Both single- and two-particle quantities can be equally obtained. 
 
