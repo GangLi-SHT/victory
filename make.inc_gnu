@@ -1,0 +1,18 @@
+FC          = mpif90
+FC_FLAGS    = -ffree-form -fbacktrace -fcheck=bounds -fno-range-check -ffree-line-length-none -fimplicit-none  
+DIR         = /nfs/home/gangli/Work/Project/victory/victory
+BIN         = ${DIR}/bin
+MODPATH     = -I${DIR}/src/SRC_MOD
+LIB = ${DIR}/lib/lib.a ${DIR}/lib/libdfftpack.a  ${DIR}/lib/liblapack.a ${DIR}/lib/librefblas.a
+
+#
+#  Archiver and its flags
+#
+
+ARCH   = ar
+ARFLAG = cr
+RANLIB = ranlib
+
+# set flags 
+FLAGS = $(FC_FLAGS)
+
