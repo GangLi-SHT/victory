@@ -1,0 +1,17 @@
+include make.inc
+
+ctqmc:
+	@echo '-------------- EXTERNAL LIB -------------------'
+	(cd ${DIR}/lib/dfftpack; make; cp libdfftpack.a ../)
+	(cd ${DIR}/lib/lapack-3.9.0; make lapacklib blaslib; cp liblapack.a librefblas.a ../) 
+	@echo '---------------- SRC_MOD ----------------------'
+	(cd $(DIR)/src/SRC_MOD; make)
+	@echo
+	@echo '---------------- SRC_PA --------------------'
+	(cd $(DIR)/src/SRC_PA; make)
+
+clean:
+	(cd $(DIR)/src/SRC_MOD; make clean)
+	(cd $(DIR)/src/SRC_PA; make clean)
+	rm -f lib/lib.a
+
